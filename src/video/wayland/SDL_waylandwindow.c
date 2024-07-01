@@ -32,6 +32,7 @@
 #include "SDL_waylandvideo.h"
 #include "../../SDL_hints_c.h"
 
+#include "alpha-modifier-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "idle-inhibit-unstable-v1-client-protocol.h"
@@ -40,6 +41,7 @@
 #include "fractional-scale-v1-client-protocol.h"
 #include "xdg-foreign-unstable-v2-client-protocol.h"
 #include "xdg-dialog-v1-client-protocol.h"
+#include "frog-color-management-v1-client-protocol.h"
 
 #ifdef HAVE_LIBDECOR_H
 #include <libdecor.h>
@@ -279,10 +281,24 @@ static void RepositionPopup(SDL_Window *window, SDL_bool use_current_position)
     }
 }
 
+static void SetSurfaceOpaqueRegion(SDL_WindowData *wind, SDL_bool is_opaque)
+{
+    SDL_VideoData *viddata = wind->waylandData;
+
+    if (is_opaque) {
+        struct wl_region *region = wl_compositor_create_region(viddata->compositor);
+        wl_region_add(region, 0, 0,
+                      wind->current.logical_width, wind->current.logical_height);
+        wl_surface_set_opaque_region(wind->surface, region);
+        wl_region_destroy(region);
+    } else {
+        wl_surface_set_opaque_region(wind->surface, NULL);
+    }
+}
+
 static void ConfigureWindowGeometry(SDL_Window *window)
 {
     SDL_WindowData *data = window->driverdata;
-    SDL_VideoData *viddata = data->waylandData;
     const int old_pixel_width = data->current.pixel_width;
     const int old_pixel_height = data->current.pixel_height;
     int window_width, window_height;
@@ -391,20 +407,12 @@ static void ConfigureWindowGeometry(SDL_Window *window)
      * need to be recalculated if the output size has changed.
      */
     if (window_size_changed) {
-        struct wl_region *region;
-
         /* libdecor does this internally on frame commits, so it's only needed for xdg surfaces. */
         if (data->shell_surface_type != WAYLAND_SURFACE_LIBDECOR && data->shell_surface.xdg.surface) {
             xdg_surface_set_window_geometry(data->shell_surface.xdg.surface, 0, 0, data->current.logical_width, data->current.logical_height);
         }
 
-        if (!(window->flags & SDL_WINDOW_TRANSPARENT)) {
-            region = wl_compositor_create_region(viddata->compositor);
-            wl_region_add(region, 0, 0,
-                          data->current.logical_width, data->current.logical_height);
-            wl_surface_set_opaque_region(data->surface, region);
-            wl_region_destroy(region);
-        }
+        SetSurfaceOpaqueRegion(data, !(window->flags & SDL_WINDOW_TRANSPARENT) && window->opacity == 1.0f);
 
         /* Ensure that child popup windows are still in bounds. */
         for (SDL_Window *child = window->first_child; child; child = child->next_sibling) {
@@ -487,8 +495,15 @@ static void FlushFullscreenEvents(SDL_Window *window)
 static void Wayland_move_window(SDL_Window *window)
 {
     SDL_WindowData *wind = window->driverdata;
-    SDL_DisplayData *display = wind->outputs[wind->num_outputs - 1];
+    SDL_DisplayData *display;
     SDL_DisplayID *displays;
+
+    if (wind->outputs && wind->num_outputs) {
+        display = wind->outputs[wind->num_outputs - 1];
+    } else {
+        /* A window may not be on any displays if minimized. */
+        return;
+    }
 
     displays = SDL_GetDisplays(NULL);
     if (displays) {
@@ -811,11 +826,18 @@ static void handle_configure_xdg_toplevel(void *data,
             }
         }
 
-        /* The content limits are only a hint, which the compositor is free to ignore,
-         * so apply them manually when appropriate.
+        /* Notes on the spec:
          *
-         * Per the spec, maximized windows must have their exact dimensions respected,
-         * thus they must not be resized, or a protocol violation can occur.
+         * - The content limits are only a hint, which the compositor is free to ignore,
+         *   so apply them manually when appropriate.
+         *
+         * - Maximized windows must have their exact dimensions respected, thus they must
+         *   not be resized, or a protocol violation can occur.
+         *
+         * - When resizing a window, the width/height are maximum values, so aspect ratio
+         *   correction can't resize beyond the existing dimensions, or a protocol violation
+         *   can occur. In practice, nothing seems to kill clients that do this, but doing
+         *   so causes GNOME to glitch out.
          */
         if (!maximized) {
             if (!wind->scale_to_display) {
@@ -828,6 +850,15 @@ static void handle_configure_xdg_toplevel(void *data,
                     wind->requested.logical_height = SDL_min(wind->requested.logical_height, window->max_h);
                 }
                 wind->requested.logical_height = SDL_max(wind->requested.logical_height, window->min_h);
+
+                /* Aspect correction. */
+                const float aspect = (float)wind->requested.logical_width / (float)wind->requested.logical_height;
+
+                if (window->min_aspect != 0.f && aspect < window->min_aspect) {
+                    wind->requested.logical_height = SDL_lroundf((float)wind->requested.logical_width / window->min_aspect);
+                } else if (window->max_aspect != 0.f && aspect > window->max_aspect) {
+                    wind->requested.logical_width = SDL_lroundf((float)wind->requested.logical_height * window->max_aspect);
+                }
             } else {
                 if (window->max_w > 0) {
                     wind->requested.pixel_width = SDL_min(wind->requested.pixel_width, window->max_w);
@@ -838,6 +869,15 @@ static void handle_configure_xdg_toplevel(void *data,
                     wind->requested.pixel_height = SDL_min(wind->requested.pixel_height, window->max_h);
                 }
                 wind->requested.pixel_height = SDL_max(wind->requested.pixel_height, window->min_h);
+
+                /* Aspect correction. */
+                const float aspect = (float)wind->requested.pixel_width / (float)wind->requested.pixel_height;
+
+                if (window->min_aspect != 0.f && aspect < window->min_aspect) {
+                    wind->requested.pixel_height = SDL_lroundf((float)wind->requested.pixel_width / window->min_aspect);
+                } else if (window->max_aspect != 0.f && aspect > window->max_aspect) {
+                    wind->requested.pixel_width = SDL_lroundf((float)wind->requested.pixel_height * window->max_aspect);
+                }
 
                 wind->requested.logical_width = PixelToPoint(window, wind->requested.pixel_width);
                 wind->requested.logical_height = PixelToPoint(window, wind->requested.pixel_height);
@@ -1168,11 +1208,18 @@ static void decoration_frame_configure(struct libdecor_frame *frame,
             }
         }
 
-        /* The content limits are only a hint, which the compositor is free to ignore,
-         * so apply them manually when appropriate.
+        /* Notes on the spec:
          *
-         * Per the spec, maximized windows must have their exact dimensions respected,
-         * thus they must not be resized, or a protocol violation can occur.
+         * - The content limits are only a hint, which the compositor is free to ignore,
+         *   so apply them manually when appropriate.
+         *
+         * - Maximized windows must have their exact dimensions respected, thus they must
+         *   not be resized, or a protocol violation can occur.
+         *
+         * - When resizing a window, the width/height are maximum values, so aspect ratio
+         *   correction can't resize beyond the existing dimensions, or a protocol violation
+         *   can occur. In practice, nothing seems to kill clients that do this, but doing
+         *   so causes GNOME to glitch out.
          */
         if (!maximized) {
             if (!wind->scale_to_display) {
@@ -1185,6 +1232,15 @@ static void decoration_frame_configure(struct libdecor_frame *frame,
                     wind->requested.logical_height = SDL_min(wind->requested.logical_height, window->max_h);
                 }
                 wind->requested.logical_height = SDL_max(wind->requested.logical_height, window->min_h);
+
+                /* Aspect correction. */
+                const float aspect = (float)wind->requested.logical_width / (float)wind->requested.logical_height;
+
+                if (window->min_aspect != 0.f && aspect < window->min_aspect) {
+                    wind->requested.logical_height = SDL_lroundf((float)wind->requested.logical_width / window->min_aspect);
+                } else if (window->max_aspect != 0.f && aspect > window->max_aspect) {
+                    wind->requested.logical_width = SDL_lroundf((float)wind->requested.logical_height * window->max_aspect);
+                }
             } else {
                 if (window->max_w > 0) {
                     wind->requested.pixel_width = SDL_min(wind->requested.pixel_width, window->max_w);
@@ -1195,6 +1251,15 @@ static void decoration_frame_configure(struct libdecor_frame *frame,
                     wind->requested.pixel_height = SDL_min(wind->requested.pixel_height, window->max_h);
                 }
                 wind->requested.pixel_height = SDL_max(wind->requested.pixel_height, window->min_h);
+
+                /* Aspect correction. */
+                const float aspect = (float)wind->requested.pixel_width / (float)wind->requested.pixel_height;
+
+                if (window->min_aspect != 0.f && aspect < window->min_aspect) {
+                    wind->requested.pixel_height = SDL_lroundf((float)wind->requested.pixel_width / window->min_aspect);
+                } else if (window->max_aspect != 0.f && aspect > window->max_aspect) {
+                    wind->requested.pixel_width = SDL_lroundf((float)wind->requested.pixel_height * window->max_aspect);
+                }
 
                 wind->requested.logical_width = PixelToPoint(window, wind->requested.pixel_width);
                 wind->requested.logical_height = PixelToPoint(window, wind->requested.pixel_height);
@@ -1414,7 +1479,7 @@ static const struct wl_surface_listener surface_listener = {
 
 static void handle_preferred_fractional_scale(void *data, struct wp_fractional_scale_v1 *wp_fractional_scale_v1, uint32_t scale)
 {
-    const float factor = scale / 120.; /* 120 is a magic number defined in the spec as a common denominator */
+    const float factor = scale / 120.f; /* 120 is a magic number defined in the spec as a common denominator */
     Wayland_HandlePreferredScaleChanged(data, factor);
 }
 
@@ -1422,9 +1487,49 @@ static const struct wp_fractional_scale_v1_listener fractional_scale_listener = 
     handle_preferred_fractional_scale
 };
 
+static void frog_preferred_metadata_handler(void *data, struct frog_color_managed_surface *frog_color_managed_surface, uint32_t transfer_function,
+                                            uint32_t output_display_primary_red_x, uint32_t output_display_primary_red_y,
+                                            uint32_t output_display_primary_green_x, uint32_t output_display_primary_green_y,
+                                            uint32_t output_display_primary_blue_x, uint32_t output_display_primary_blue_y,
+                                            uint32_t output_white_point_x, uint32_t output_white_point_y,
+                                            uint32_t max_luminance, uint32_t min_luminance,
+                                            uint32_t max_full_frame_luminance)
+{
+    SDL_WindowData *wind = (SDL_WindowData *)data;
+    SDL_HDROutputProperties HDR;
+
+    SDL_zero(HDR);
+
+    switch (transfer_function) {
+    case FROG_COLOR_MANAGED_SURFACE_TRANSFER_FUNCTION_ST2084_PQ:
+        /* ITU-R BT.2408-7 (Sept 2023) has the reference PQ white level at 203 nits,
+         * while older Dolby documentation claims a reference level of 100 nits.
+         *
+         * Use 203 nits for now.
+         */
+        HDR.HDR_headroom = max_luminance / 203.0f;
+        break;
+    case FROG_COLOR_MANAGED_SURFACE_TRANSFER_FUNCTION_SCRGB_LINEAR:
+        HDR.HDR_headroom = max_luminance / 80.0f;
+        break;
+    case FROG_COLOR_MANAGED_SURFACE_TRANSFER_FUNCTION_UNDEFINED:
+    case FROG_COLOR_MANAGED_SURFACE_TRANSFER_FUNCTION_SRGB:
+    case FROG_COLOR_MANAGED_SURFACE_TRANSFER_FUNCTION_GAMMA_22:
+    default:
+        HDR.HDR_headroom = 1.0f;
+        break;
+    }
+
+    HDR.SDR_white_level = 1.0f;
+    SDL_SetWindowHDRProperties(wind->sdlwindow, &HDR, SDL_TRUE);
+}
+
+static const struct frog_color_managed_surface_listener frog_surface_listener = {
+    frog_preferred_metadata_handler
+};
+
 static void SetKeyboardFocus(SDL_Window *window)
 {
-    SDL_Window *kb_focus = SDL_GetKeyboardFocus();
     SDL_Window *topmost = window;
 
     /* Find the topmost parent */
@@ -1434,11 +1539,6 @@ static void SetKeyboardFocus(SDL_Window *window)
 
     topmost->driverdata->keyboard_focus = window;
 
-    /* Clear the mouse capture flags before changing keyboard focus */
-    if (kb_focus) {
-        kb_focus->flags &= ~SDL_WINDOW_MOUSE_CAPTURE;
-    }
-    window->flags &= ~SDL_WINDOW_MOUSE_CAPTURE;
     SDL_SetKeyboardFocus(window);
 }
 
@@ -1797,7 +1897,7 @@ static void Wayland_ReleasePopup(SDL_VideoDevice *_this, SDL_Window *popup)
     SDL_WindowData *popupdata;
 
     /* Basic sanity checks to weed out the weird popup closures */
-    if (!popup || popup->magic != &_this->window_magic) {
+    if (!SDL_ObjectValid(popup, SDL_OBJECT_TYPE_WINDOW)) {
         return;
     }
     popupdata = popup->driverdata;
@@ -2302,6 +2402,18 @@ int Wayland_CreateWindow(SDL_VideoDevice *_this, SDL_Window *window, SDL_Propert
         }
     }
 
+    if (!custom_surface_role) {
+        if (c->frog_color_management_factory_v1) {
+            data->frog_color_managed_surface = frog_color_management_factory_v1_get_color_managed_surface(c->frog_color_management_factory_v1, data->surface);
+            frog_color_managed_surface_add_listener(data->frog_color_managed_surface, &frog_surface_listener, data);
+        }
+
+        if (c->wp_alpha_modifier_v1) {
+            data->wp_alpha_modifier_surface_v1 = wp_alpha_modifier_v1_get_surface(c->wp_alpha_modifier_v1, data->surface);
+            wp_alpha_modifier_surface_v1_set_multiplier(data->wp_alpha_modifier_surface_v1, SDL_MAX_UINT32);
+        }
+    }
+
     /* Must be called before EGL configuration to set the drawable backbuffer size. */
     ConfigureWindowGeometry(window);
 
@@ -2494,6 +2606,20 @@ SDL_DisplayID Wayland_GetDisplayForWindow(SDL_VideoDevice *_this, SDL_Window *wi
     return 0;
 }
 
+int Wayland_SetWindowOpacity(SDL_VideoDevice *_this, SDL_Window *window, float opacity)
+{
+    SDL_WindowData *wind = window->driverdata;
+
+    if (wind->wp_alpha_modifier_surface_v1) {
+        SetSurfaceOpaqueRegion(wind, !(window->flags & SDL_WINDOW_TRANSPARENT) && opacity == 1.0f);
+        wp_alpha_modifier_surface_v1_set_multiplier(wind->wp_alpha_modifier_surface_v1, (Uint32)((double)SDL_MAX_UINT32 * (double)opacity));
+
+        return 0;
+    }
+
+    return SDL_SetError("wayland: set window opacity failed; compositor lacks support for the required wp_alpha_modifier_v1 protocol");
+}
+
 void Wayland_SetWindowTitle(SDL_VideoDevice *_this, SDL_Window *window)
 {
     SDL_WindowData *wind = window->driverdata;
@@ -2612,6 +2738,14 @@ void Wayland_DestroyWindow(SDL_VideoDevice *_this, SDL_Window *window)
 
         if (wind->fractional_scale) {
             wp_fractional_scale_v1_destroy(wind->fractional_scale);
+        }
+
+        if (wind->wp_alpha_modifier_surface_v1) {
+            wp_alpha_modifier_surface_v1_destroy(wind->wp_alpha_modifier_surface_v1);
+        }
+
+        if (wind->frog_color_managed_surface) {
+            frog_color_managed_surface_destroy(wind->frog_color_managed_surface);
         }
 
         SDL_free(wind->outputs);

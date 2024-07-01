@@ -330,7 +330,7 @@ jobs:
               -B build_x64 -A x64
           cmake --build build_x64 --config Release --verbose
           ctest --test-dir build_x64 --no-tests=error -C Release --output-on-failure
-      - name: 'CMake (configure + build + tests) arm64'
+      - name: 'CMake (configure + build) arm64'
         run: |
           $env:PATH += ";${{ steps.bin.outputs.path }}/x86"
           cmake -S "${{ steps.src.outputs.path }}/cmake/test"     `
@@ -344,7 +344,7 @@ jobs:
 
   mingw:
     needs: [src]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # FIXME: current ubuntu-latest ships an outdated mingw, replace with ubuntu-latest once 24.04 becomes the new default
     outputs:
       mingw-devel-tar-gz: ${{ steps.releaser.outputs.mingw-devel-tar-gz }}
       mingw-devel-tar-xz: ${{ steps.releaser.outputs.mingw-devel-tar-xz }}

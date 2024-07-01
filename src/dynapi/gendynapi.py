@@ -75,7 +75,20 @@ def main():
         parsing_comment = False
         current_comment = ""
 
+        ignore_wiki_documentation = False
+
         for line in input:
+
+            # Skip lines if we're in a wiki documentation block.
+            if ignore_wiki_documentation:
+                if line.startswith("#endif"):
+                    ignore_wiki_documentation = False
+                continue
+
+            # Discard wiki documentions blocks.
+            if line.startswith("#ifdef SDL_WIKI_DOCUMENTATION_SECTION"):
+                ignore_wiki_documentation = True
+                continue
 
             # Discard pre-processor directives ^#.*
             if line.startswith("#"):
@@ -156,7 +169,7 @@ def main():
             func = func.replace(" SDL_WPRINTF_VARARG_FUNC(3)", "");
             func = func.replace(" SDL_SCANF_VARARG_FUNC(2)", "");
             func = func.replace(" SDL_SCANF_VARARG_FUNCV(2)", "");
-            func = func.replace(" __attribute__((analyzer_noreturn))", "");
+            func = func.replace(" SDL_ANALYZER_NORETURN", "");
             func = func.replace(" SDL_MALLOC", "");
             func = func.replace(" SDL_ALLOC_SIZE2(1, 2)", "");
             func = func.replace(" SDL_ALLOC_SIZE(2)", "");

@@ -41,14 +41,16 @@
 #include "SDL_log_c.h"
 #include "SDL_properties_c.h"
 #include "audio/SDL_sysaudio.h"
+#include "camera/SDL_camera_c.h"
 #include "cpuinfo/SDL_cpuinfo_c.h"
-#include "video/SDL_video_c.h"
 #include "events/SDL_events_c.h"
 #include "haptic/SDL_haptic_c.h"
 #include "joystick/SDL_gamepad_c.h"
 #include "joystick/SDL_joystick_c.h"
+#include "render/SDL_sysrender.h"
 #include "sensor/SDL_sensor_c.h"
-#include "camera/SDL_camera_c.h"
+#include "stdlib/SDL_getenv_c.h"
+#include "video/SDL_video_c.h"
 
 #define SDL_INIT_EVERYTHING ~0U
 
@@ -58,7 +60,6 @@
 extern int SDL_HelperWindowCreate(void);
 extern int SDL_HelperWindowDestroy(void);
 #endif
-extern void SDL_FreeEnvironmentMemory(void);
 
 #ifdef SDL_BUILD_MAJOR_VERSION
 SDL_COMPILE_TIME_ASSERT(SDL_BUILD_MAJOR_VERSION,
@@ -474,6 +475,7 @@ void SDL_QuitSubSystem(Uint32 flags)
 #ifndef SDL_VIDEO_DISABLED
     if (flags & SDL_INIT_VIDEO) {
         if (SDL_ShouldQuitSubsystem(SDL_INIT_VIDEO)) {
+            SDL_QuitRender();
             SDL_VideoQuit();
             /* video implies events */
             SDL_QuitSubSystem(SDL_INIT_EVENTS);
@@ -543,6 +545,7 @@ void SDL_Quit(void)
     SDL_DBus_Quit();
 #endif
 
+    SDL_SetObjectsInvalid();
     SDL_ClearHints();
     SDL_AssertionsQuit();
 
@@ -563,20 +566,6 @@ void SDL_Quit(void)
     SDL_bInMainQuit = SDL_FALSE;
 }
 
-/* Assume we can wrap SDL_AtomicInt values and cast to Uint32 */
-SDL_COMPILE_TIME_ASSERT(sizeof_object_id, sizeof(int) == sizeof(Uint32));
-
-Uint32 SDL_GetNextObjectID(void)
-{
-    static SDL_AtomicInt last_id;
-
-    Uint32 id = (Uint32)SDL_AtomicIncRef(&last_id) + 1;
-    if (id == 0) {
-        id = (Uint32)SDL_AtomicIncRef(&last_id) + 1;
-    }
-    return id;
-}
-
 /* Get the library version number */
 int SDL_GetVersion(void)
 {
@@ -586,10 +575,11 @@ int SDL_GetVersion(void)
 /* Get the library source revision */
 const char *SDL_GetRevision(void)
 {
-    return SDL_REVISION;
+    return SDL_REVISION;  // a string literal, no need to SDL_FreeLater it.
 }
 
-/* Get the name of the platform */
+// Get the name of the platform
+// (a string literal, no need to SDL_FreeLater it.)
 const char *SDL_GetPlatform(void)
 {
 #if defined(SDL_PLATFORM_AIX)

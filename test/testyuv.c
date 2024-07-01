@@ -351,7 +351,7 @@ int main(int argc, char **argv)
                 yuv_format = SDL_PIXELFORMAT_NV21;
                 consumed = 1;
             } else if (SDL_strcmp(argv[i], "--rgb555") == 0) {
-                rgb_format = SDL_PIXELFORMAT_RGB555;
+                rgb_format = SDL_PIXELFORMAT_XRGB1555;
                 consumed = 1;
             } else if (SDL_strcmp(argv[i], "--rgb565") == 0) {
                 rgb_format = SDL_PIXELFORMAT_RGB565;
@@ -507,11 +507,11 @@ int main(int argc, char **argv)
                     done = 1;
                 }
                 if (event.type == SDL_EVENT_KEY_DOWN) {
-                    if (event.key.keysym.sym == SDLK_ESCAPE) {
+                    if (event.key.key == SDLK_ESCAPE) {
                         done = 1;
-                    } else if (event.key.keysym.sym == SDLK_LEFT) {
+                    } else if (event.key.key == SDLK_LEFT) {
                         --current;
-                    } else if (event.key.keysym.sym == SDLK_RIGHT) {
+                    } else if (event.key.key == SDLK_RIGHT) {
                         ++current;
                     }
                 }

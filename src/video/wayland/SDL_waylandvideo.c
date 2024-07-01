@@ -43,8 +43,10 @@
 
 #include <wayland-util.h>
 
+#include "alpha-modifier-v1-client-protocol.h"
 #include "cursor-shape-v1-client-protocol.h"
 #include "fractional-scale-v1-client-protocol.h"
+#include "frog-color-management-v1-client-protocol.h"
 #include "idle-inhibit-unstable-v1-client-protocol.h"
 #include "input-timestamps-unstable-v1-client-protocol.h"
 #include "kde-output-order-v1-client-protocol.h"
@@ -487,6 +489,7 @@ static SDL_VideoDevice *Wayland_CreateDevice(void)
     device->SetWindowMinimumSize = Wayland_SetWindowMinimumSize;
     device->SetWindowMaximumSize = Wayland_SetWindowMaximumSize;
     device->SetWindowModalFor = Wayland_SetWindowModalFor;
+    device->SetWindowOpacity = Wayland_SetWindowOpacity;
     device->SetWindowTitle = Wayland_SetWindowTitle;
     device->GetWindowSizeInPixels = Wayland_GetWindowSizeInPixels;
     device->GetDisplayForWindow = Wayland_GetDisplayForWindow;
@@ -508,7 +511,7 @@ static SDL_VideoDevice *Wayland_CreateDevice(void)
     device->HasClipboardData = Wayland_HasClipboardData;
     device->StartTextInput = Wayland_StartTextInput;
     device->StopTextInput = Wayland_StopTextInput;
-    device->SetTextInputRect = Wayland_SetTextInputRect;
+    device->UpdateTextInputArea = Wayland_UpdateTextInputArea;
 
 #ifdef SDL_VIDEO_VULKAN
     device->Vulkan_LoadLibrary = Wayland_Vulkan_LoadLibrary;
@@ -524,7 +527,8 @@ static SDL_VideoDevice *Wayland_CreateDevice(void)
                           VIDEO_DEVICE_CAPS_HAS_POPUP_WINDOW_SUPPORT |
                           VIDEO_DEVICE_CAPS_SENDS_FULLSCREEN_DIMENSIONS |
                           VIDEO_DEVICE_CAPS_SENDS_DISPLAY_CHANGES |
-                          VIDEO_DEVICE_CAPS_DISABLE_MOUSE_WARP_ON_FULLSCREEN_TRANSITIONS;
+                          VIDEO_DEVICE_CAPS_DISABLE_MOUSE_WARP_ON_FULLSCREEN_TRANSITIONS |
+                          VIDEO_DEVICE_CAPS_SENDS_HDR_CHANGES;
 
     return device;
 }
@@ -1107,9 +1111,13 @@ static void display_handle_global(void *data, struct wl_registry *registry, uint
         d->zxdg_exporter_v2 = wl_registry_bind(d->registry, id, &zxdg_exporter_v2_interface, 1);
     } else if (SDL_strcmp(interface, "xdg_wm_dialog_v1") == 0) {
         d->xdg_wm_dialog_v1 = wl_registry_bind(d->registry, id, &xdg_wm_dialog_v1_interface, 1);
+    } else if (SDL_strcmp(interface, "wp_alpha_modifier_v1") == 0) {
+        d->wp_alpha_modifier_v1 = wl_registry_bind(d->registry, id, &wp_alpha_modifier_v1_interface, 1);
     } else if (SDL_strcmp(interface, "kde_output_order_v1") == 0) {
         d->kde_output_order = wl_registry_bind(d->registry, id, &kde_output_order_v1_interface, 1);
         kde_output_order_v1_add_listener(d->kde_output_order, &kde_output_order_listener, d);
+    } else if (SDL_strcmp(interface, "frog_color_management_factory_v1") == 0) {
+        d->frog_color_management_factory_v1 = wl_registry_bind(d->registry, id, &frog_color_management_factory_v1_interface, 1);
     }
 }
 
@@ -1369,10 +1377,20 @@ static void Wayland_VideoCleanup(SDL_VideoDevice *_this)
         data->xdg_wm_dialog_v1 = NULL;
     }
 
+    if (data->wp_alpha_modifier_v1) {
+        wp_alpha_modifier_v1_destroy(data->wp_alpha_modifier_v1);
+        data->wp_alpha_modifier_v1 = NULL;
+    }
+
     if (data->kde_output_order) {
         Wayland_FlushOutputOrder(data);
         kde_output_order_v1_destroy(data->kde_output_order);
         data->kde_output_order = NULL;
+    }
+
+    if (data->frog_color_management_factory_v1) {
+        frog_color_management_factory_v1_destroy(data->frog_color_management_factory_v1);
+        data->frog_color_management_factory_v1 = NULL;
     }
 
     if (data->compositor) {

@@ -327,7 +327,7 @@ extern "C" {
  * latency or higher throughput AND ARE WILLING TO DEAL WITH what that might
  * require of the app), they can specify it.
  *
- * SDL will try to accomodate this value, but there is no promise you'll get
+ * SDL will try to accommodate this value, but there is no promise you'll get
  * the buffer size requested. Many platforms won't honor this request at all,
  * or might adjust it.
  *
@@ -370,7 +370,7 @@ extern "C" {
  * Some audio backends (such as Pipewire) allow you to describe the role of
  * your audio stream. Among other things, this description might show up in a
  * system control panel or software for displaying and manipulating media
- * playback/capture graphs.
+ * playback/recording graphs.
  *
  * This hints lets you transmit that information to the OS. The contents of
  * this hint are used while opening an audio device. You should use a string
@@ -943,37 +943,27 @@ extern "C" {
 #define SDL_HINT_HIDAPI_IGNORE_DEVICES "SDL_HIDAPI_IGNORE_DEVICES"
 
 /**
- * A variable to control whether certain IMEs should handle text editing
- * internally instead of sending SDL_EVENT_TEXT_EDITING events.
+ * A variable describing what IME UI elements the application can display.
  *
- * The variable can be set to the following values:
+ * By default IME UI is handled using native components by the OS where
+ * possible, however this can interfere with or not be visible when exclusive
+ * fullscreen mode is used.
  *
- * - "0": SDL_EVENT_TEXT_EDITING events are sent, and it is the application's
- *   responsibility to render the text from these events and differentiate it
- *   somehow from committed text. (default)
- * - "1": If supported by the IME then SDL_EVENT_TEXT_EDITING events are not
- *   sent, and text that is being composed will be rendered in its own UI.
+ * The variable can be set to a comma separated list containing the following
+ * items:
  *
- * This hint can be set anytime.
- *
- * \since This hint is available since SDL 3.0.0.
- */
-#define SDL_HINT_IME_INTERNAL_EDITING "SDL_IME_INTERNAL_EDITING"
-
-/**
- * A variable to control whether certain IMEs should show native UI components
- * (such as the Candidate List) instead of suppressing them.
- *
- * The variable can be set to the following values:
- *
- * - "0": Native UI components are not display. (default)
- * - "1": Native UI components are displayed.
+ * - "none" or "0": The application can't render any IME elements, and native
+ *   UI should be used. (default)
+ * - "composition": The application handles SDL_EVENT_TEXT_EDITING events and
+ *   can render the composition text.
+ * - "candidates": The application handles SDL_EVENT_TEXT_EDITING_CANDIDATES
+ *   and can render the candidate list.
  *
  * This hint should be set before SDL is initialized.
  *
  * \since This hint is available since SDL 3.0.0.
  */
-#define SDL_HINT_IME_SHOW_UI "SDL_IME_SHOW_UI"
+#define SDL_HINT_IME_IMPLEMENTED_UI "SDL_IME_IMPLEMENTED_UI"
 
 /**
  * A variable controlling whether the home indicator bar on iPhone X should be
@@ -1050,7 +1040,7 @@ extern "C" {
 #define SDL_HINT_JOYSTICK_ARCADESTICK_DEVICES_EXCLUDED "SDL_JOYSTICK_ARCADESTICK_DEVICES_EXCLUDED"
 
 /**
- * A variable containing a list of devices that should not be considerd
+ * A variable containing a list of devices that should not be considered
  * joysticks.
  *
  * The format of the string is a comma separated list of USB VID/PID pairs in
@@ -2004,6 +1994,36 @@ extern "C" {
 #define SDL_HINT_JOYSTICK_ZERO_CENTERED_DEVICES "SDL_JOYSTICK_ZERO_CENTERED_DEVICES"
 
 /**
+ * A variable that controls keycode representation in keyboard events.
+ *
+ * This variable is a comma separated set of options for translating keycodes
+ * in events:
+ *
+ * - "none": Keycode options are cleared, this overrides other options.
+ * - "french_numbers": The number row on French keyboards is inverted, so
+ *   pressing the 1 key would yield the keycode SDLK_1, or '1', instead of
+ *   SDLK_AMPERSAND, or '&'
+ * - "latin_letters": For keyboards using non-Latin letters, such as Russian
+ *   or Thai, the letter keys generate keycodes as though it had an en_US
+ *   layout. e.g. pressing the key associated with SDL_SCANCODE_A on a Russian
+ *   keyboard would yield 'a' instead of 'ф'.
+ *
+ * The default value for this hint is "french_numbers"
+ *
+ * Some platforms like Emscripten only provide modified keycodes and the
+ * options are not used.
+ *
+ * These options do not affect the return value of SDL_GetKeyFromScancode() or
+ * SDL_GetScancodeFromKey(), they just apply to the keycode included in key
+ * events.
+ *
+ * This hint can be set anytime.
+ *
+ * \since This hint is available since SDL 3.0.0.
+ */
+#define SDL_HINT_KEYCODE_OPTIONS "SDL_KEYCODE_OPTIONS"
+
+/**
  * A variable that controls what KMSDRM device to use.
  *
  * SDL might open something like "/dev/dri/cardNN" to access KMSDRM
@@ -2288,6 +2308,41 @@ extern "C" {
  * \since This hint is available since SDL 3.0.0.
  */
 #define SDL_HINT_MOUSE_RELATIVE_WARP_MOTION  "SDL_MOUSE_RELATIVE_WARP_MOTION"
+
+/**
+ * A variable controlling whether the hardware cursor stays visible when
+ * relative mode is active.
+ *
+ * This variable can be set to the following values: "0" - The cursor will be
+ * hidden while relative mode is active (default) "1" - The cursor will remain
+ * visible while relative mode is active
+ *
+ * Note that for systems without raw hardware inputs, relative mode is
+ * implemented using warping, so the hardware cursor will visibly warp between
+ * frames if this is enabled on those systems.
+ *
+ * This hint can be set anytime.
+ *
+ * \since This hint is available since SDL 3.0.0.
+ */
+#define SDL_HINT_MOUSE_RELATIVE_CURSOR_VISIBLE  "SDL_MOUSE_RELATIVE_CURSOR_VISIBLE"
+
+/**
+ * Controls how often SDL issues cursor confinement commands to the operating
+ * system while relative mode is active, in case the desired confinement state
+ * became out-of-sync due to interference from other running programs.
+ *
+ * The variable can be integers representing miliseconds between each refresh.
+ * A value of zero means SDL will not automatically refresh the confinement.
+ * The default value varies depending on the operating system, this variable
+ * might not have any effects on inapplicable platforms such as those without
+ * a cursor.
+ *
+ * This hint can be set anytime.
+ *
+ * \since This hint is available since SDL 3.0.0.
+ */
+#define SDL_HINT_MOUSE_RELATIVE_CLIP_INTERVAL  "SDL_MOUSE_RELATIVE_CLIP_INTERVAL"
 
 /**
  * A variable controlling whether mouse events should generate synthetic touch
@@ -2576,7 +2631,7 @@ extern "C" {
  *
  * The variable can be set to the following values:
  *
- * - "0": Use the prefered OS device. (default)
+ * - "0": Use the preferred OS device. (default)
  * - "1": Select a low power device.
  *
  * This hint should be set before creating a renderer.
@@ -3464,8 +3519,8 @@ extern "C" {
  *
  * The variable can be set to the following values:
  *
- * - "0": The Windows message loop is used for keyboard events.
- * - "1": Low latency raw keyboard events are used. (default)
+ * - "0": The Windows message loop is used for keyboard events. (default)
+ * - "1": Low latency raw keyboard events are used.
  *
  * This hint can be set anytime.
  *
@@ -3551,6 +3606,23 @@ extern "C" {
  * \since This hint is available since SDL 3.0.0.
  */
 #define SDL_HINT_WINDOWS_USE_D3D9EX "SDL_WINDOWS_USE_D3D9EX"
+
+/**
+ * A variable controlling whether SDL will clear the window contents when the
+ * WM_ERASEBKGND message is received.
+ *
+ * The variable can be set to the following values:
+ *
+ * - "0"/"never": Never clear the window.
+ * - "1"/"initial": Clear the window when the first WM_ERASEBKGND event fires.
+ *   (default)
+ * - "2"/"always": Clear the window on every WM_ERASEBKGND event.
+ *
+ * This hint should be set before creating a window.
+ *
+ * \since This hint is available since SDL 3.0.0.
+ */
+#define SDL_HINT_WINDOWS_ERASE_BACKGROUND_MODE "SDL_WINDOWS_ERASE_BACKGROUND_MODE"
 
 /**
  * A variable controlling whether back-button-press events on Windows Phone to
@@ -3738,9 +3810,9 @@ typedef enum SDL_HintPriority
  * value. Hints will replace existing hints of their priority and lower.
  * Environment variables are considered to have override priority.
  *
- * \param name the hint to set
- * \param value the value of the hint variable
- * \param priority the SDL_HintPriority level for the hint
+ * \param name the hint to set.
+ * \param value the value of the hint variable.
+ * \param priority the SDL_HintPriority level for the hint.
  * \returns SDL_TRUE if the hint was set, SDL_FALSE otherwise.
  *
  * \since This function is available since SDL 3.0.0.
@@ -3760,8 +3832,8 @@ extern SDL_DECLSPEC SDL_bool SDLCALL SDL_SetHintWithPriority(const char *name,
  * variable that takes precedence. You can use SDL_SetHintWithPriority() to
  * set the hint with override priority instead.
  *
- * \param name the hint to set
- * \param value the value of the hint variable
+ * \param name the hint to set.
+ * \param value the value of the hint variable.
  * \returns SDL_TRUE if the hint was set, SDL_FALSE otherwise.
  *
  * \since This function is available since SDL 3.0.0.
@@ -3780,7 +3852,7 @@ extern SDL_DECLSPEC SDL_bool SDLCALL SDL_SetHint(const char *name,
  * the environment isn't set. Callbacks will be called normally with this
  * change.
  *
- * \param name the hint to set
+ * \param name the hint to set.
  * \returns SDL_TRUE if the hint was set, SDL_FALSE otherwise.
  *
  * \since This function is available since SDL 3.0.0.
@@ -3806,7 +3878,9 @@ extern SDL_DECLSPEC void SDLCALL SDL_ResetHints(void);
 /**
  * Get the value of a hint.
  *
- * \param name the hint to query
+ * The returned string follows the SDL_GetStringRule.
+ *
+ * \param name the hint to query.
  * \returns the string value of a hint or NULL if the hint isn't set.
  *
  * \since This function is available since SDL 3.0.0.
@@ -3819,8 +3893,8 @@ extern SDL_DECLSPEC const char * SDLCALL SDL_GetHint(const char *name);
 /**
  * Get the boolean value of a hint variable.
  *
- * \param name the name of the hint to get the boolean value from
- * \param default_value the value to return if the hint does not exist
+ * \param name the name of the hint to get the boolean value from.
+ * \param default_value the value to return if the hint does not exist.
  * \returns the boolean value of a hint or the provided default value if the
  *          hint does not exist.
  *
@@ -3834,10 +3908,10 @@ extern SDL_DECLSPEC SDL_bool SDLCALL SDL_GetHintBoolean(const char *name, SDL_bo
 /**
  * Type definition of the hint callback function.
  *
- * \param userdata what was passed as `userdata` to SDL_AddHintCallback()
- * \param name what was passed as `name` to SDL_AddHintCallback()
- * \param oldValue the previous hint value
- * \param newValue the new value hint is to be set to
+ * \param userdata what was passed as `userdata` to SDL_AddHintCallback().
+ * \param name what was passed as `name` to SDL_AddHintCallback().
+ * \param oldValue the previous hint value.
+ * \param newValue the new value hint is to be set to.
  *
  * \since This datatype is available since SDL 3.0.0.
  */
@@ -3846,10 +3920,10 @@ typedef void (SDLCALL *SDL_HintCallback)(void *userdata, const char *name, const
 /**
  * Add a function to watch a particular hint.
  *
- * \param name the hint to watch
- * \param callback An SDL_HintCallback function that will be called when the
- *                 hint value changes
- * \param userdata a pointer to pass to the callback function
+ * \param name the hint to watch.
+ * \param callback an SDL_HintCallback function that will be called when the
+ *                 hint value changes.
+ * \param userdata a pointer to pass to the callback function.
  * \returns 0 on success or a negative error code on failure; call
  *          SDL_GetError() for more information.
  *
@@ -3867,10 +3941,10 @@ extern SDL_DECLSPEC int SDLCALL SDL_AddHintCallback(const char *name,
 /**
  * Remove a function watching a particular hint.
  *
- * \param name the hint being watched
- * \param callback An SDL_HintCallback function that will be called when the
- *                 hint value changes
- * \param userdata a pointer being passed to the callback function
+ * \param name the hint being watched.
+ * \param callback an SDL_HintCallback function that will be called when the
+ *                 hint value changes.
+ * \param userdata a pointer being passed to the callback function.
  *
  * \since This function is available since SDL 3.0.0.
  *
